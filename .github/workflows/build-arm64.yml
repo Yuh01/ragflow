@@ -1,0 +1,61 @@
+name: Build RAGFlow ARM64 Light Image
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  workflow_dispatch:  # 允许手动触发
+
+env:
+  REGISTRY: swr.cn-north-4.myhuaweicloud.com
+  REPO: ddn-k8s/ragflow  # 替换为你的命名空间/项目名
+  IMAGE_NAME: ${{ env.REGISTRY }}/${{ env.REPO }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-22.04-arm  # ⭐ 原生 ARM64 runner（由 GitHub 提供）
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (optional, but safe)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Huawei Cloud SWR
+        run: |
+          echo "${{ secrets.SWR_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u ${{ secrets.SWR_USERNAME }} --password-stdin
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long,prefix=
+
+      - name: Build and push ARM64 light image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          build-args: |
+            LIGHTEN=1
+            NEED_MIRROR=1
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
